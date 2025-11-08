@@ -1,5 +1,6 @@
+'use client'
 import React from 'react';
-import App from '../components/App';
+import Canvas from '../../components/canvas/Canvas';
 
 export default function Page() {
   return (
@@ -7,7 +8,7 @@ export default function Page() {
     <div className="flex flex-col h-screen">
       <div className="h-[20%]"></div>
       <div className="">
-        <App />
+        <Canvas/>
       </div>
       
     </div>
