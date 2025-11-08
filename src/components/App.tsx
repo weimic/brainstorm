@@ -3,7 +3,7 @@
 import React from 'react';
 import { useAuth } from '../hooks/useAuth';
 import Login from './Login';
-import MockPage from './MockPage';
+import { useRouter } from 'next/navigation';
 
 const LoadingSpinner: React.FC = () => (
     <div className="flex items-center justify-center min-h-full">
@@ -12,15 +12,25 @@ const LoadingSpinner: React.FC = () => (
 );
 
 const App: React.FC = () => {
+    // All hooks are called at the top level, in a consistent order
     const { user, loading } = useAuth();
+    const router = useRouter();
 
+    // Navigation effect runs after auth state is determined
+    React.useEffect(() => {
+        if (!loading && user) {
+            router.replace('/dashboard');
+        }
+    }, [user, loading, router]);
+
+    // Loading state check after hooks
     if (loading) {
         return <LoadingSpinner />;
     }
 
     return (
         <main className="h-full font-sans text-gray-100">
-            {user ? <MockPage user={user} /> : <Login />}
+            {!user && <Login />}
         </main>
     );
 };
