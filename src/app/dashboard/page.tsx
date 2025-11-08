@@ -5,8 +5,11 @@ import { useProjects } from "@/hooks/useProjects";
 import { CreateProjectModal } from "@/components/CreateProjectModal";
 import { Skeleton } from "@/components/ui/skeleton";
 import Link from "next/link";
-import { FolderIcon, CalendarIcon, SparklesIcon } from "lucide-react";
+import { FolderIcon, CalendarIcon, SparklesIcon, LogOutIcon } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
+import { signOut } from "firebase/auth";
+import { auth } from "@/services/firebase";
+import { Button } from "@/components/ui/button";
 
 const LoadingSpinner: React.FC = () => (
     <div className="flex items-center justify-center min-h-full">
@@ -15,7 +18,7 @@ const LoadingSpinner: React.FC = () => (
 );
 
 export default function Dashboard() {
-  const { loading } = useAuth();
+  const { user, loading } = useAuth();
   const router = useRouter();
   const { projects, loading: pLoading, error } = useProjects();
 
@@ -25,6 +28,14 @@ export default function Dashboard() {
 
   const handleProjectCreated = (projectId: string) => {
     router.push(`/dashboard/projects/${projectId}`);
+  };
+
+  const handleAuthAction = () => {
+    if (user) {
+      signOut(auth);
+    } else {
+      router.push('/');
+    }
   };
 
   return (
@@ -43,12 +54,41 @@ export default function Dashboard() {
                   : "Create your first project to get started"}
               </p>
             </div>
-            <CreateProjectModal onProjectCreated={handleProjectCreated} />
+            <div className="flex items-center gap-4">
+              <Button
+                variant="outline"
+                onClick={handleAuthAction}
+                className="cursor-pointer flex items-center gap-2"
+              >
+                <LogOutIcon className="h-4 w-4" />
+                {user ? 'Sign Out' : 'Sign In'}
+              </Button>
+              {user && <CreateProjectModal onProjectCreated={handleProjectCreated} />}
+            </div>
           </div>
         </div>
 
+        {/* Auth Required State */}
+        {!loading && !user && (
+          <div className="mx-auto max-w-md rounded-xl border border-slate-200 bg-white p-12 text-center shadow-sm">
+            <div className="mx-auto mb-6 flex h-16 w-16 items-center justify-center rounded-full bg-slate-100">
+              <LogOutIcon className="h-8 w-8 text-slate-400" />
+            </div>
+            <h3 className="mb-2 text-lg font-semibold text-slate-900">Authentication Required</h3>
+            <p className="mb-6 text-sm text-slate-600">
+              Please sign in to view and create projects. Your ideas are waiting!
+            </p>
+            <Button
+              onClick={handleAuthAction}
+              className="flex items-center gap-2 mx-auto cursor-pointer"
+            >
+              Sign In to Continue
+            </Button>
+          </div>
+        )}
+
         {/* Loading State */}
-        {pLoading && (
+        {pLoading && user && (
           <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
             {[...Array(4)].map((_, i) => (
               <div key={i} className="group relative">
@@ -69,7 +109,7 @@ export default function Dashboard() {
         )}
 
         {/* Error State */}
-        {error && (
+        {error && user && (
           <div className="mx-auto max-w-md rounded-xl border border-red-200 bg-red-50 p-8 text-center">
             <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-red-100">
               <SparklesIcon className="h-6 w-6 text-red-600" />
@@ -81,7 +121,7 @@ export default function Dashboard() {
         )}
 
         {/* Empty State */}
-        {!pLoading && !error && projects.length === 0 && (
+        {!pLoading && !error && user && projects.length === 0 && (
           <div className="mx-auto max-w-md rounded-xl border border-slate-200 bg-white p-12 text-center shadow-sm">
             <div className="mx-auto mb-6 flex h-16 w-16 items-center justify-center rounded-full bg-slate-100">
               <FolderIcon className="h-8 w-8 text-slate-400" />
@@ -95,7 +135,7 @@ export default function Dashboard() {
         )}
 
         {/* Projects Grid */}
-        {!pLoading && projects.length > 0 && (
+        {!pLoading && user && projects.length > 0 && (
           <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
             {projects.map(({ id, data }) => (
               <Link
