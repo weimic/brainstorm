@@ -2,14 +2,43 @@
 
 import { useParams } from "next/navigation";
 
-export default function ProjectPage() {
-  const params = useParams();
-  const projectId = (params?.projectId as string) ?? "";
+import {
+    SidebarProvider,
+    SidebarTrigger,
+    Sidebar,
+    SidebarContent,
+    SidebarGroup,
+    SidebarHeader,
+} from "@/components/ui/sidebar";
 
-  return (
-    <div style={{ padding: 16 }}>
-      <h1>Project: {projectId}</h1>
-      {/* Fetch and render project/ideas client-side after auth using services/firestore.ts */}
-    </div>
-  );
+function ProjectSidebar() {
+    return (
+        <Sidebar side="right">
+            <SidebarContent>
+                <SidebarGroup>{/* Sidebar items go here */}</SidebarGroup>
+            </SidebarContent>
+        </Sidebar>
+    );
+}
+
+export default function ProjectPage() {
+    const params = useParams();
+    const projectId = (params?.projectId as string) ?? "";
+
+    return (
+        <SidebarProvider>
+            <main>
+                <SidebarTrigger />
+                {/* Main project content goes here (canvas) */}
+            </main>
+            <Sidebar side="right">
+                <SidebarContent>
+                    <SidebarHeader>
+                        <h1>Project: {projectId}</h1>
+                    </SidebarHeader>
+                    <SidebarGroup>{/* Sidebar items go here */}</SidebarGroup>
+                </SidebarContent>
+            </Sidebar>
+        </SidebarProvider>
+    );
 }
