@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import { cn } from '@/lib/utils';
 import IdeaCard from './IdeaCard';
 
@@ -23,17 +23,10 @@ const Leaf: React.FC<LeafProps> = ({
 	isGenerating,
 	isActive,
 }) => {
-	const [editLabel, setEditLabel] = useState(label);
-
-	const handleLabelChange = useCallback((newLabel: string) => {
-		setEditLabel(newLabel);
-		if (onChange) onChange(newLabel);
-	}, [onChange]);
-
 	return (
 		<IdeaCard
-			label={editLabel}
-			onLabelChange={handleLabelChange}
+			label={label}
+			onLabelChange={(newLabel) => onChange?.(newLabel)}
 			className={cn("border-emerald-200/70", className)}
 			titleClassName="text-emerald-900 placeholder:text-emerald-700/60"
 			extraContext={extraContext}
@@ -41,6 +34,7 @@ const Leaf: React.FC<LeafProps> = ({
 			onGenerateMore={onGenerateMore}
 			isGenerating={isGenerating}
 			isActive={isActive}
+			editable={false} // Titles are not editable directly on the card
 		/>
 	);
 };

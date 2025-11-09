@@ -19,6 +19,40 @@ import { listIdeasForProject } from '@/services/firestore';
 import Link from "next/link";
 import Canvas from "@/components/canvas/Canvas";
 import { useAuth } from "@/hooks/useAuth";
+import { useRef } from 'react';
+
+function GridToggleButton({ onClick, isActive }: { onClick: () => void; isActive: boolean }) {
+    return (
+        <Button
+            variant="ghost"
+            size="icon"
+            className="size-7"
+            onClick={onClick}
+            title={isActive ? "Hide Grid" : "Show Grid"}
+        >
+            <svg 
+                xmlns="http://www.w3.org/2000/svg" 
+                width="16" 
+                height="16" 
+                viewBox="0 0 16 16" 
+                fill="none" 
+                stroke="currentColor" 
+                strokeWidth="1.5"
+            >
+                <rect x="1" y="1" width="4.5" height="4.5" />
+                <rect x="5.75" y="1" width="4.5" height="4.5" />
+                <rect x="10.5" y="1" width="4.5" height="4.5" />
+                <rect x="1" y="5.75" width="4.5" height="4.5" />
+                <rect x="5.75" y="5.75" width="4.5" height="4.5" />
+                <rect x="10.5" y="5.75" width="4.5" height="4.5" />
+                <rect x="1" y="10.5" width="4.5" height="4.5" />
+                <rect x="5.75" y="10.5" width="4.5" height="4.5" />
+                <rect x="10.5" y="10.5" width="4.5" height="4.5" />
+            </svg>
+            <span className="sr-only">Toggle Grid</span>
+        </Button>
+    );
+}
 
 export default function ProjectPage() {
     const projectId = useParams()?.projectId as string | null;
@@ -26,6 +60,25 @@ export default function ProjectPage() {
     const info = useProjectData(projectId);
     const data = info.project?.data;
     const [likedIdeas, setLikedIdeas] = useState<{ id: string; text: string }[]>([]);
+    const gridToggleRef = useRef<(() => void) | null>(null);
+    const gridStateRef = useRef<(() => boolean) | null>(null);
+    const [gridActive, setGridActive] = useState(false);
+    
+    const handleGridToggleReady = (toggleFn: () => void, getState: () => boolean) => {
+        gridToggleRef.current = toggleFn;
+        gridStateRef.current = getState;
+    };
+    
+    const handleGridButtonClick = () => {
+        if (gridToggleRef.current) {
+            gridToggleRef.current();
+            // Update button state
+            if (gridStateRef.current) {
+                setTimeout(() => setGridActive(gridStateRef.current!()), 0);
+            }
+        }
+    };
+    
     const refreshLiked = async () => {
         if (!user || !projectId) return;
         const all = await listIdeasForProject(user.uid, projectId);
@@ -38,10 +91,16 @@ export default function ProjectPage() {
                 <main className="flex-1">
                     {/* Main project content goes here (canvas) */}
                     {user && projectId && (
-                        <Canvas userId={user.uid} projectId={projectId} projectContext={data?.mainContext || ''} />
+                        <Canvas 
+                            userId={user.uid} 
+                            projectId={projectId} 
+                            projectContext={data?.mainContext || ''} 
+                            onGridToggleReady={handleGridToggleReady}
+                        />
                     )}
                 </main>
-                <div className="fixed right-4 top-4 z-50">
+                <div className="fixed right-4 top-4 z-50 flex gap-2">
+                    <GridToggleButton onClick={handleGridButtonClick} isActive={gridActive} />
                     <SidebarTrigger />
                 </div>
                 <Sidebar side="right">

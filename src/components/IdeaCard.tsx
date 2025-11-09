@@ -12,6 +12,7 @@ interface IdeaCardProps {
   onGenerateMore?: () => void;
   isGenerating?: boolean;
   isActive?: boolean;
+  editable?: boolean; // controls whether the title is user-editable
 }
 
 const IdeaCard: React.FC<IdeaCardProps> = ({
@@ -25,9 +26,11 @@ const IdeaCard: React.FC<IdeaCardProps> = ({
   onGenerateMore,
   isGenerating = false,
   isActive = false,
+  editable = false,
 }) => {
   const [localExtraContext, setLocalExtraContext] = useState(extraContext);
   const titleRef = React.useRef<HTMLDivElement>(null);
+  const isUserEditingRef = React.useRef(false);
   const showGenerateButton = isActive && localExtraContext.trim().length > 0;
 
   const handleExtraContextChange = (value: string) => {
@@ -35,9 +38,9 @@ const IdeaCard: React.FC<IdeaCardProps> = ({
     onExtraContextChange?.(value);
   };
 
-  // Sync label to contentEditable when it changes externally
+  // Sync label to contentEditable when it changes externally (but NOT during user editing)
   React.useEffect(() => {
-    if (titleRef.current && titleRef.current.textContent !== label) {
+    if (titleRef.current && !isUserEditingRef.current && titleRef.current.textContent !== label) {
       titleRef.current.textContent = label;
     }
   }, [label]);
@@ -52,17 +55,28 @@ const IdeaCard: React.FC<IdeaCardProps> = ({
     >
       <div
         ref={titleRef}
-        contentEditable
+        contentEditable={editable}
         role="textbox"
         aria-label="Idea title"
         data-placeholder="Title"
+        onFocus={() => {
+          if (!editable) return;
+          isUserEditingRef.current = true;
+        }}
         onInput={(e) => {
+          if (!editable) return;
           const text = (e.target as HTMLDivElement).textContent || '';
           onLabelChange(text);
         }}
         onBlur={(e) => {
+          if (!editable) return;
+          isUserEditingRef.current = false;
           const text = ((e.target as HTMLDivElement).textContent || '').trim();
           onLabelChange(text);
+        }}
+        onClick={(e) => {
+          // Only stop propagation if editing is enabled; otherwise allow selection click to bubble
+          if (editable) e.stopPropagation();
         }}
         suppressContentEditableWarning
         className={cn(

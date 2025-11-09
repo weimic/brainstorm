@@ -4,33 +4,35 @@ import { Button } from '../ui/button';
 
 
 interface ToolbarProps {
-    addItem: (type: 'branch' | 'leaf' | 'note') => void;
+    onAddBranch: () => void;
+    onAddLeaf: () => void;
+    onAddNote: () => void;
     onCenter: () => void;
     onRefresh?: () => void;
     canRefresh?: boolean;
 }
 
-const Toolbar: React.FC<ToolbarProps> = ({ addItem, onCenter, onRefresh, canRefresh = false }) => {
+const Toolbar: React.FC<ToolbarProps> = ({ onAddBranch, onAddLeaf, onAddNote, onCenter, onRefresh, canRefresh = false }) => {
     return (
         <div className="absolute top-4 left-4 bg-card p-4 rounded-lg shadow-md z-10">
             <div className="gap-4 flex flex-row items-center">
                 <Button 
                     variant="outline"
-                    onClick={() => addItem('branch')}
+                    onClick={onAddBranch}
                     className="px-4 py-2"
                 >
                     Add Branch
                 </Button>
                 <Button 
                     variant="outline"
-                    onClick={() => addItem('leaf')}
+                    onClick={onAddLeaf}
                     className="px-4 py-2"
                 >
                     Add Leaf
                 </Button>
                 <Button 
                     variant="outline"
-                    onClick={() => addItem('note')}
+                    onClick={onAddNote}
                     className="px-4 py-2 bg-yellow-50 hover:bg-yellow-100 border-yellow-300"
                     title="Add a sticky note"
                 >

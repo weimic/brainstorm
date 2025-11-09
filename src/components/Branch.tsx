@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import { cn } from '@/lib/utils';
 import IdeaCard from './IdeaCard';
 
@@ -23,17 +23,10 @@ const Branch: React.FC<BranchProps> = ({
   isGenerating,
   isActive,
 }) => {
-  const [editLabel, setEditLabel] = useState(label);
-
-  const handleLabelChange = useCallback((newLabel: string) => {
-    setEditLabel(newLabel);
-    if (onChange) onChange(newLabel);
-  }, [onChange]);
-
   return (
     <IdeaCard
-      label={editLabel}
-      onLabelChange={handleLabelChange}
+      label={label}
+      onLabelChange={(newLabel) => onChange?.(newLabel)}
       style={{ minWidth: 260, maxWidth: 380 }}
       className={cn('border-amber-200/70', className)}
       titleClassName="text-amber-900 placeholder:text-amber-800/60"
@@ -42,6 +35,7 @@ const Branch: React.FC<BranchProps> = ({
       onGenerateMore={onGenerateMore}
       isGenerating={isGenerating}
       isActive={isActive}
+      editable={false} // Titles are not editable directly on the card
     />
   );
 };

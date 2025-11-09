@@ -7,11 +7,13 @@ import Branch from '../Branch';
 import Leaf from '../Leaf';
 import Note from '../Note';
 import { createIdea, listIdeasForProject, updateIdea, toggleIdeaLiked, deleteIdea } from '../../services/firestore';
-import { createNote, listNotesForProject, updateNote, deleteNote } from '../../services/firestore';
+import { createNote, listNotesForProject, updateNote } from '../../services/firestore';
+import { CreateIdeaForm } from './CreateIdeaForm';
 import { Skeleton } from '@/components/ui/skeleton';
 import { cn } from '@/lib/utils';
 
 type ItemType = 'branch' | 'leaf' | 'note';
+
 
 interface Item {
     id: string;
@@ -64,9 +66,10 @@ interface CanvasProps {
     userId: string;
     projectId: string;
     projectContext?: string; // provide from page to avoid DOM query races
+    onGridToggleReady?: (toggleFn: () => void, getState: () => boolean) => void;
 }
 
-const Canvas: React.FC<CanvasProps> = ({ userId, projectId, projectContext = '' }) => {
+const Canvas: React.FC<CanvasProps> = ({ userId, projectId, projectContext = '', onGridToggleReady }) => {
     const canvasRef = useRef<HTMLCanvasElement | null>(null);
     const [scale, setScale] = useState<number>(1);
     const [translateX, setTranslateX] = useState<number>(0);
@@ -77,7 +80,14 @@ const Canvas: React.FC<CanvasProps> = ({ userId, projectId, projectContext = '' 
     const [userExtraContext, setUserExtraContext] = useState<string>('');
     const [isGenerating, setIsGenerating] = useState<boolean>(false);
     const [isAtEdge, setIsAtEdge] = useState(false);
+    const [showGrid, setShowGrid] = useState<boolean>(false);
+    const [formOpen, setFormOpen] = useState(false);
+    const [formItemType, setFormItemType] = useState<'branch' | 'leaf'>('branch');
     const edgeTimeoutRef = useRef<number | null>(null);
+    // Maintain an effective projectContext derived from props or DOM so generation never silently skips
+    const [effectiveProjectContext, setEffectiveProjectContext] = useState<string>(projectContext);
+    const saveTimeoutRef = useRef<Record<string, number>>({});
+    const showGridRef = useRef(showGrid);
 
     // refs for immediate responsiveness and to avoid stale closures in render
     const scaleRef = useRef(scale);
@@ -89,6 +99,40 @@ const Canvas: React.FC<CanvasProps> = ({ userId, projectId, projectContext = '' 
     useEffect(() => { txRef.current = translateX; }, [translateX]);
     useEffect(() => { tyRef.current = translateY; }, [translateY]);
     useEffect(() => { itemsRef.current = items; }, [items]);
+    useEffect(() => { showGridRef.current = showGrid; }, [showGrid]);
+
+    // Keep effective context in sync with prop changes
+    useEffect(() => {
+        setEffectiveProjectContext(projectContext);
+    }, [projectContext]);
+
+    // Derive project context from DOM if not provided via props (e.g., legacy pages)
+    useEffect(() => {
+        if (projectContext) return; // already provided
+        if (typeof document === 'undefined') return;
+        const el = document.querySelector('[data-project-main-context]');
+        const text = el?.textContent?.trim() || '';
+        if (text) setEffectiveProjectContext(text);
+        // Optional: observe future changes
+        if (el) {
+            const observer = new MutationObserver(() => {
+                const t = el.textContent?.trim() || '';
+                setEffectiveProjectContext(t);
+            });
+            observer.observe(el, { characterData: true, subtree: true, childList: true });
+            return () => observer.disconnect();
+        }
+    }, [projectContext]);
+
+    // Expose grid toggle function to parent - call only once
+    useEffect(() => {
+        if (onGridToggleReady) {
+            const toggleFn = () => setShowGrid(prev => !prev);
+            const getState = () => showGridRef.current;
+            onGridToggleReady(toggleFn, getState);
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
 
     // Smoothly center the view and reset zoom
     const centerView = useCallback(() => {
@@ -172,22 +216,24 @@ const Canvas: React.FC<CanvasProps> = ({ userId, projectId, projectContext = '' 
         ctx.translate(txRef.current, tyRef.current);
         ctx.scale(scaleRef.current, scaleRef.current);
 
-        // Grid
-        const gridSize = 50;
-        ctx.lineWidth = 1 / Math.max(1, scaleRef.current);
-        ctx.strokeStyle = 'rgba(128,128,128,0.12)';
+        // Grid - only render if showGrid is true
+        if (showGridRef.current) {
+            const gridSize = 50;
+            ctx.lineWidth = 1 / Math.max(1, scaleRef.current);
+            ctx.strokeStyle = 'rgba(128,128,128,0.12)';
 
-        const viewLeft = (-txRef.current) / scaleRef.current;
-        const viewTop = (-tyRef.current) / scaleRef.current;
-        const viewRight = (cssWidth - txRef.current) / scaleRef.current;
-        const viewBottom = (cssHeight - tyRef.current) / scaleRef.current;
+            const viewLeft = (-txRef.current) / scaleRef.current;
+            const viewTop = (-tyRef.current) / scaleRef.current;
+            const viewRight = (cssWidth - txRef.current) / scaleRef.current;
+            const viewBottom = (cssHeight - tyRef.current) / scaleRef.current;
 
-        const startX = Math.floor(viewLeft / gridSize) * gridSize;
-        const startY = Math.floor(viewTop / gridSize) * gridSize;
+            const startX = Math.floor(viewLeft / gridSize) * gridSize;
+            const startY = Math.floor(viewTop / gridSize) * gridSize;
 
-        for (let x = startX; x <= viewRight; x += gridSize) {
-            for (let y = startY; y <= viewBottom; y += gridSize) {
-                ctx.strokeRect(x, y, gridSize, gridSize);
+            for (let x = startX; x <= viewRight; x += gridSize) {
+                for (let y = startY; y <= viewBottom; y += gridSize) {
+                    ctx.strokeRect(x, y, gridSize, gridSize);
+                }
             }
         }
 
@@ -293,13 +339,13 @@ const Canvas: React.FC<CanvasProps> = ({ userId, projectId, projectContext = '' 
         const runInitial = async () => {
             if (!userId || !projectId) return;
             if (itemsRef.current.length > 0) return; // already have ideas
-            if (!projectContext) return;
+            if (!effectiveProjectContext) return;
             setIsGenerating(true);
             try {
                 const resp = await fetch('/api/ideas/generate', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ mode: 'initial', projectContext }),
+                    body: JSON.stringify({ mode: 'initial', projectContext: effectiveProjectContext }),
                 });
                 const json = await resp.json();
                 if (json?.ideas?.length) {
@@ -330,7 +376,7 @@ const Canvas: React.FC<CanvasProps> = ({ userId, projectId, projectContext = '' 
             }
         };
         void runInitial();
-    }, [userId, projectId, projectContext, findOpenSpot]);
+    }, [userId, projectId, effectiveProjectContext, findOpenSpot]);
 
     // Handle clicking an item: make active, center view smoothly, fetch addtlText if missing
     const handleItemClick = useCallback(async (item: Item) => {
@@ -386,13 +432,13 @@ const Canvas: React.FC<CanvasProps> = ({ userId, projectId, projectContext = '' 
         }
         
         // Only generate addtlText if: no content exists (in state or DB), not manually created, and hasn't been generated before
-        if (!item.content && !item.isManuallyCreated && projectContext) {
+        if (!item.content && !item.isManuallyCreated && effectiveProjectContext) {
             try {
                 setIsGenerating(true);
                 const resp = await fetch('/api/ideas/generate', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ mode: 'addtl', projectContext, parentText: item.label, extraContext: userExtraContext || undefined }),
+                    body: JSON.stringify({ mode: 'addtl', projectContext: effectiveProjectContext, parentText: item.label, extraContext: userExtraContext || undefined }),
                 });
                 const json = await resp.json();
                 if (json?.addtlText) {
@@ -409,57 +455,55 @@ const Canvas: React.FC<CanvasProps> = ({ userId, projectId, projectContext = '' 
             }
         }
         
-        // Auto-generate child ideas for AI-generated items (skip manually created ones)
-        if (!item.isManuallyCreated && !item.parentId) {
-            // Only generate if this item doesn't already have children
-            const hasChildren = itemsRef.current.some(i => i.parentId === item.id);
-            if (!hasChildren && projectContext) {
-                try {
-                    setIsGenerating(true);
-                    const resp = await fetch('/api/ideas/generate', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ mode: 'related', projectContext, parentText: item.label, extraContext: userExtraContext || undefined }),
-                    });
-                    const json = await resp.json();
-                    if (json?.ideas?.length) {
-                        const newOnes: Item[] = [];
-                        const outAngle = Math.atan2(item.y - 0, item.x - 0);
-                        const offsets = [-0.5, 0, 0.5];
-                        for (let i = 0; i < json.ideas.length; i++) {
-                            const angle = outAngle + offsets[i % offsets.length];
-                            const baseDist = 380 + i * 50;
-                            const targetX = item.x + Math.cos(angle) * baseDist;
-                            const targetY = item.y + Math.sin(angle) * baseDist;
-                            const spot = findOpenSpot(targetX, targetY, 340);
-                            const ideaText = json.ideas[i];
-                            const ideaId = await createIdea(userId, projectId, { text: ideaText, parentId: item.id, x: spot.x, y: spot.y });
-                            newOnes.push({ id: ideaId, type: 'leaf', x: spot.x, y: spot.y, label: ideaText, parentId: item.id });
-                        }
-                        setItems((prev) => {
-                            const merged = [...prev, ...newOnes];
-                            itemsRef.current = merged;
-                            return merged;
-                        });
+        // Auto-generate child ideas if this item doesn't have any yet
+        // This runs when an item is selected for the first time.
+        const hasChildren = itemsRef.current.some(i => i.parentId === item.id);
+        if (!item.parentId && !hasChildren && effectiveProjectContext) {
+            try {
+                setIsGenerating(true);
+                const resp = await fetch('/api/ideas/generate', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ mode: 'related', projectContext: effectiveProjectContext, parentText: item.label, extraContext: userExtraContext || undefined }),
+                });
+                const json = await resp.json();
+                if (json?.ideas?.length) {
+                    const newOnes: Item[] = [];
+                    const outAngle = Math.atan2(item.y - 0, item.x - 0);
+                    const offsets = [-0.5, 0, 0.5];
+                    for (let i = 0; i < json.ideas.length; i++) {
+                        const angle = outAngle + offsets[i % offsets.length];
+                        const baseDist = 380 + i * 50;
+                        const targetX = item.x + Math.cos(angle) * baseDist;
+                        const targetY = item.y + Math.sin(angle) * baseDist;
+                        const spot = findOpenSpot(targetX, targetY, 340);
+                        const ideaText = json.ideas[i];
+                        const ideaId = await createIdea(userId, projectId, { text: ideaText, parentId: item.id, x: spot.x, y: spot.y });
+                        newOnes.push({ id: ideaId, type: 'leaf', x: spot.x, y: spot.y, label: ideaText, parentId: item.id });
                     }
-                } catch (e) {
-                    console.error('Failed to generate child ideas', e);
-                } finally {
-                    setIsGenerating(false);
+                    setItems((prev) => {
+                        const merged = [...prev, ...newOnes];
+                        itemsRef.current = merged;
+                        return merged;
+                    });
                 }
+            } catch (e) {
+                console.error('Failed to generate child ideas', e);
+            } finally {
+                setIsGenerating(false);
             }
         }
-    }, [projectId, userId, userExtraContext, projectContext, findOpenSpot]);
+    }, [projectId, userId, userExtraContext, effectiveProjectContext, findOpenSpot, items]);
 
     // Generate related ideas (3) branching from active item with user's extra context
     const handleGenerateMore = useCallback(async (item: Item) => {
-        if (!projectContext) return;
+        if (!effectiveProjectContext) return;
         try {
             setIsGenerating(true);
             const resp = await fetch('/api/ideas/generate', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ mode: 'related', projectContext, parentText: item.label, extraContext: userExtraContext || undefined }),
+                body: JSON.stringify({ mode: 'related', projectContext: effectiveProjectContext, parentText: item.label, extraContext: userExtraContext || undefined }),
             });
             const json = await resp.json();
             if (json?.ideas?.length) {
@@ -490,11 +534,11 @@ const Canvas: React.FC<CanvasProps> = ({ userId, projectId, projectContext = '' 
         } finally {
             setIsGenerating(false);
         }
-    }, [projectId, userId, userExtraContext, projectContext, findOpenSpot]);
+    }, [projectId, userId, userExtraContext, effectiveProjectContext, findOpenSpot]);
 
     // Refresh child ideas: delete existing children and generate new ones
     const handleRefreshChildren = useCallback(async () => {
-        if (!activeId || !projectContext) return;
+    if (!activeId || !effectiveProjectContext) return;
         const activeItem = itemsRef.current.find(i => i.id === activeId);
         if (!activeItem) return;
         
@@ -522,7 +566,7 @@ const Canvas: React.FC<CanvasProps> = ({ userId, projectId, projectContext = '' 
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ 
                     mode: 'related', 
-                    projectContext, 
+                    projectContext: effectiveProjectContext, 
                     parentText: activeItem.label, 
                     extraContext: userExtraContext || undefined 
                 }),
@@ -570,7 +614,7 @@ const Canvas: React.FC<CanvasProps> = ({ userId, projectId, projectContext = '' 
         } finally {
             setIsGenerating(false);
         }
-    }, [activeId, projectId, userId, userExtraContext, projectContext, findOpenSpot]);
+    }, [activeId, projectId, userId, userExtraContext, effectiveProjectContext, findOpenSpot]);
 
     const handleToggleLike = useCallback(async (id: string) => {
         try {
@@ -586,7 +630,7 @@ const Canvas: React.FC<CanvasProps> = ({ userId, projectId, projectContext = '' 
         if (rafRef.current) cancelAnimationFrame(rafRef.current);
         rafRef.current = requestAnimationFrame(() => { render(); rafRef.current = null; });
         return () => { if (rafRef.current) cancelAnimationFrame(rafRef.current); };
-    }, [scale, translateX, translateY, items, render]);
+    }, [scale, translateX, translateY, items, showGrid, render]);
 
     // wheel zoom (zoom towards pointer)
     const handleWheel: React.WheelEventHandler<HTMLCanvasElement> = (e) => {
@@ -653,7 +697,7 @@ const Canvas: React.FC<CanvasProps> = ({ userId, projectId, projectContext = '' 
     };
 
     // Create a new item and persist as an Idea with coordinates
-    const addItem = useCallback(async (type: ItemType) => {
+    const addItem = useCallback(async (type: ItemType, data?: { label: string; context: string }) => {
         const canvas = canvasRef.current;
         if (!canvas) return;
         const cssWidth = canvas.clientWidth;
@@ -673,37 +717,58 @@ const Canvas: React.FC<CanvasProps> = ({ userId, projectId, projectContext = '' 
             } catch (err) {
                 console.error('Failed to create note', err);
             }
-        } else {
-            // Create an idea (branch or leaf)
-            const defaultLabel = type === 'branch' ? 'New Branch' : 'New Question';
+        } else if (data) {
+            // Create an idea (branch or leaf) from form data
             try {
                 const ideaId = await createIdea(userId, projectId, {
-                    text: defaultLabel,
-                    addtlText: '',
+                    text: data.label,
+                    addtlText: data.context,
                     x: worldX,
                     y: worldY,
                 });
+                const newItem: Item = {
+                    id: ideaId,
+                    type,
+                    x: worldX,
+                    y: worldY,
+                    label: data.label,
+                    content: data.context,
+                    isManuallyCreated: true,
+                };
                 setItems((prev) => {
-                    const next = [
-                        ...prev,
-                        {
-                            id: ideaId,
-                            type,
-                            x: worldX,
-                            y: worldY,
-                            label: defaultLabel,
-                            content: '',
-                            isManuallyCreated: true,
-                        },
-                    ];
+                    const next = [...prev, newItem];
                     itemsRef.current = next;
                     return next;
                 });
+                // Automatically trigger generation for the new item
+                setTimeout(() => {
+                    setActiveId(newItem.id);
+                    void handleItemClick(newItem);
+                }, 20);
             } catch (err) {
                 console.error('Failed to create idea for canvas item', err);
             }
         }
-    }, [userId, projectId]);
+    }, [userId, projectId, handleItemClick]);
+
+    const handleAddBranch = () => {
+        setFormItemType('branch');
+        setFormOpen(true);
+    };
+
+    const handleAddLeaf = () => {
+        setFormItemType('leaf');
+        setFormOpen(true);
+    };
+
+    const handleAddNote = () => {
+        addItem('note');
+    };
+
+    const handleFormSubmit = (data: { label: string; context: string }) => {
+        addItem(formItemType, data);
+        setFormOpen(false);
+    };
 
     // Main render
     return (
@@ -711,12 +776,20 @@ const Canvas: React.FC<CanvasProps> = ({ userId, projectId, projectContext = '' 
             {/* Top toolbar - always visible */}
             <div className="w-full flex-none z-10 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/75 border-b">
                 <Toolbar 
-                    addItem={addItem} 
+                    onAddBranch={handleAddBranch}
+                    onAddLeaf={handleAddLeaf}
+                    onAddNote={handleAddNote}
                     onCenter={centerView}
                     onRefresh={handleRefreshChildren}
                     canRefresh={!!activeId && itemsRef.current.some(i => i.parentId === activeId)}
                 />
             </div>
+            <CreateIdeaForm
+                open={formOpen}
+                onOpenChange={setFormOpen}
+                itemType={formItemType}
+                onSubmit={handleFormSubmit}
+            />
             {/* Canvas container - fills remaining space */}
             <div className="flex-1 relative overflow-hidden">
                 <canvas
@@ -793,27 +866,26 @@ const Canvas: React.FC<CanvasProps> = ({ userId, projectId, projectContext = '' 
                         })}
                     </svg>
                     
-                    {(() => {
-                        const contextEl = typeof document !== 'undefined' ? document.querySelector('[data-project-main-context]') : null;
-                        const projectContext = contextEl?.textContent?.trim() || '';
-                        if (!projectContext) return null;
-                        const screenX = 0 * scale + translateX;
-                        const screenY = 0 * scale + translateY;
-                        const style: React.CSSProperties = {
-                            position: 'absolute',
-                            left: screenX,
-                            top: screenY,
-                            transform: `translate(-50%, -50%)`,
-                            transformOrigin: 'center center',
-                            zIndex: 1,
-                            pointerEvents: 'none',
-                        };
-                        return (
-                            <div style={style}>
-                                <Branch label={projectContext} />
-                            </div>
-                        );
-                    })()}
+                    {effectiveProjectContext && (
+                        (() => {
+                            const screenX = 0 * scale + translateX;
+                            const screenY = 0 * scale + translateY;
+                            const style: React.CSSProperties = {
+                                position: 'absolute',
+                                left: screenX,
+                                top: screenY,
+                                transform: `translate(-50%, -50%)`,
+                                transformOrigin: 'center center',
+                                zIndex: 1,
+                                pointerEvents: 'none',
+                            };
+                            return (
+                                <div style={style}>
+                                    <Branch label={effectiveProjectContext} />
+                                </div>
+                            );
+                        })()
+                    )}
                     {items.map((item) => {
                         const screenX = item.x * scale + translateX;
                         const screenY = item.y * scale + translateY;
@@ -830,21 +902,7 @@ const Canvas: React.FC<CanvasProps> = ({ userId, projectId, projectContext = '' 
 
                         const commonProps = {
                             label: item.label,
-                            onChange: (newLabel: string) => {
-                                // Clear isManuallyCreated only if user changed from default labels
-                                const wasDefaultLabel = item.label === 'New Branch' || item.label === 'New Question';
-                                const labelChanged = newLabel !== item.label;
-                                const shouldClearManualFlag = item.isManuallyCreated && wasDefaultLabel && labelChanged;
-                                
-                                const updatedItems = itemsRef.current.map(i =>
-                                    i.id === item.id
-                                        ? { ...i, label: newLabel, isManuallyCreated: shouldClearManualFlag ? false : i.isManuallyCreated }
-                                        : i
-                                );
-                                setItems(updatedItems);
-                                itemsRef.current = updatedItems;
-                                updateIdea(userId, projectId, item.id, { text: newLabel }).catch(() => {});
-                            },
+                            onChange: () => {}, // No-op since editing is disabled
                             extraContext: userExtraContext,
                             onExtraContextChange: setUserExtraContext,
                             onGenerateMore: () => handleGenerateMore(item),
