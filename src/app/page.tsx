@@ -4,7 +4,7 @@ import React, { useState, useEffect } from 'react';
 import App from '../components/App';
 
 const TAGLINES = [
-  "Writer, no block.",
+  "Write, no block.",
   "Where ideas take root.",
   "Branch out your thoughts.",
   "Plant seeds of innovation.",
