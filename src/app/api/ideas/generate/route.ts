@@ -43,7 +43,6 @@ export async function POST(req: NextRequest) {
     } else if (mode === 'related') {
       sysGoal = `Given the active idea/provocation and the original project context, continue the established mode: If the active item is an IDEA STARTER: Generate three new branching ideas that build upon, twist, or are adjacent to the original concept. If the active item is a PROVOCATION: Generate three new follow-up provocations that escalate the challenge, introduce a constraint, or explore a consequence. Keep each to 3-15 words maximum. Be direct, clear, and maintain the creative (Generator) or challenging (Provocateur) tone.`;
     } else {
-      console.error("why");
       sysGoal = `Given the active idea and the project context, write a concise, impactful exploration (2-4 sentences maximum) that reveals one key insight, tension, or creative direction. Be specific and generative. Focus on depth over breadth - one powerful angle is better than surface-level coverage of many. Make every word count.`;
     }
 
