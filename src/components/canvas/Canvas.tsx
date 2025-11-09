@@ -1,9 +1,11 @@
 'use client';
+// NOTE: This component intentionally uses refs to mirror state for immediate rendering control.
+// Refs are mutated directly; ensure any new logic preserves consistency between refs and state.
 import React, { useRef, useEffect, useState, useCallback } from 'react';
 import Toolbar from './Toolbar';
 import Branch from '../Branch';
 import Leaf from '../Leaf';
-import { createCanvasBlockWithIdea, listIdeasForProject } from '../../services/firestore';
+import { createIdea, listIdeasForProject, updateIdea } from '../../services/firestore';
 
 type ItemType = 'branch' | 'leaf';
 
@@ -51,10 +53,31 @@ const smoothTransition = (
     requestAnimationFrame(animate);
 };
 
-const Canvas: React.FC = () => {
-    // TODO: Replace with actual user/project context
-    const userId = 'demoUser';
-    const projectId = 'demoProject';
+interface CanvasProps {
+    userId: string;
+    projectId: string;
+}
+
+const Canvas: React.FC<CanvasProps> = ({ userId, projectId }) => {
+    const canvasRef = useRef<HTMLCanvasElement | null>(null);
+    const [scale, setScale] = useState<number>(1);
+    const [translateX, setTranslateX] = useState<number>(0);
+    const [translateY, setTranslateY] = useState<number>(0);
+    const [items, setItems] = useState<Item[]>([]);
+    const [isAtEdge, setIsAtEdge] = useState(false);
+    const edgeTimeoutRef = useRef<number | null>(null);
+
+    // refs for immediate responsiveness and to avoid stale closures in render
+    const scaleRef = useRef(scale);
+    const txRef = useRef(translateX);
+    const tyRef = useRef(translateY);
+    const itemsRef = useRef<Item[]>(items);
+
+    useEffect(() => { scaleRef.current = scale; }, [scale]);
+    useEffect(() => { txRef.current = translateX; }, [translateX]);
+    useEffect(() => { tyRef.current = translateY; }, [translateY]);
+    useEffect(() => { itemsRef.current = items; }, [items]);
+
     // Smoothly center the view and reset zoom
     const centerView = useCallback(() => {
         const canvas = canvasRef.current;
@@ -80,24 +103,6 @@ const Canvas: React.FC = () => {
             setTranslateY(value);
         });
     }, []);
-    const canvasRef = useRef<HTMLCanvasElement | null>(null);
-    const [scale, setScale] = useState<number>(1);
-    const [translateX, setTranslateX] = useState<number>(0);
-    const [translateY, setTranslateY] = useState<number>(0);
-    const [items, setItems] = useState<Item[]>([]);
-    const [isAtEdge, setIsAtEdge] = useState(false);
-    const edgeTimeoutRef = useRef<number | null>(null);
-
-    // refs for immediate responsiveness and to avoid stale closures in render
-    const scaleRef = useRef(scale);
-    const txRef = useRef(translateX);
-    const tyRef = useRef(translateY);
-    const itemsRef = useRef<Item[]>(items);
-
-    useEffect(() => { scaleRef.current = scale; }, [scale]);
-    useEffect(() => { txRef.current = translateX; }, [translateX]);
-    useEffect(() => { tyRef.current = translateY; }, [translateY]);
-    useEffect(() => { itemsRef.current = items; }, [items]);
 
     // Compute allowed translation range for current scale
     const clampTranslation = useCallback((tx: number, ty: number, currentScale: number) => {
@@ -200,16 +205,42 @@ const Canvas: React.FC = () => {
         window.addEventListener('resize', onResize);
         // initial
         resize();
-
-        // Center the view on initial mount (client only)
-        setTranslateX(Math.max(document.documentElement.clientWidth, window.innerWidth || 0) / 2);
-        setTranslateY(Math.max(document.documentElement.clientHeight, window.innerHeight || 0) / 2);
+        // Center the view on initial mount (animate via rAF callbacks)
+        centerView();
 
         return () => {
             window.removeEventListener('resize', onResize);
             if (rafRef.current) cancelAnimationFrame(rafRef.current);
         };
-    }, [render]);
+    }, [render, centerView]);
+
+    // Load existing ideas as items on mount / when project changes
+    useEffect(() => {
+        let cancelled = false;
+        const load = async () => {
+            if (!userId || !projectId) return;
+            try {
+                const ideas = await listIdeasForProject(userId, projectId);
+                if (cancelled) return;
+                setItems(
+                    ideas.map((i) => ({
+                        id: i.id,
+                        type: 'leaf',
+                        x: i.data.x ?? 0,
+                        y: i.data.y ?? 0,
+                        label: i.data.text,
+                        content: i.data.addtlText,
+                    }))
+                );
+            } catch (err) {
+                console.error('Failed to load ideas for canvas', err);
+            }
+        };
+        load();
+        return () => {
+            cancelled = true;
+        };
+    }, [userId, projectId]);
 
     // schedule renders when transform/scale/items change
     useEffect(() => {
@@ -282,7 +313,7 @@ const Canvas: React.FC = () => {
         startRef.current = null;
     };
 
-    // Smoothly center the view and reset zoom
+    // Create a new item and persist as an Idea with coordinates
     const addItem = useCallback(async (type: ItemType) => {
         const canvas = canvasRef.current;
         if (!canvas) return;
@@ -290,29 +321,33 @@ const Canvas: React.FC = () => {
         const cssHeight = canvas.clientHeight;
         const worldX = (cssWidth / 2 - txRef.current) / scaleRef.current;
         const worldY = (cssHeight / 2 - tyRef.current) / scaleRef.current;
-        // Create Firestore-linked block
-        const block = await createCanvasBlockWithIdea(
-            userId,
-            projectId,
-            type,
-            type === 'branch' ? 'New Branch' : 'New Question',
-            '',
-            undefined,
-            undefined
-        );
-        setItems((prev) => {
-            const next = [...prev, {
-                id: block.id,
-                type: block.type,
+        const defaultLabel = type === 'branch' ? 'New Branch' : 'New Question';
+        try {
+            const ideaId = await createIdea(userId, projectId, {
+                text: defaultLabel,
+                addtlText: '',
                 x: worldX,
                 y: worldY,
-                label: block.label,
-                content: block.content,
-            }];
-            itemsRef.current = next;
-            return next;
-        });
-    }, [userId, projectId, scale, translateX, translateY]);
+            });
+            setItems((prev) => {
+                const next = [
+                    ...prev,
+                    {
+                        id: ideaId,
+                        type,
+                        x: worldX,
+                        y: worldY,
+                        label: defaultLabel,
+                        content: '',
+                    },
+                ];
+                itemsRef.current = next;
+                return next;
+            });
+        } catch (err) {
+            console.error('Failed to create idea for canvas item', err);
+        }
+    }, [userId, projectId]);
 
     // Main render
     return (
@@ -364,11 +399,13 @@ const Canvas: React.FC = () => {
                                     content={item.content}
                                     style={style}
                                     onChange={(newLabel, newContent) => {
-                                        setItems(items.map(i => 
-                                            i.id === item.id 
+                                        setItems(items.map(i =>
+                                            i.id === item.id
                                                 ? { ...i, label: newLabel, content: newContent }
                                                 : i
                                         ));
+                                        // Persist label/content changes for branches as well if desired
+                                        updateIdea(userId, projectId, item.id, { text: newLabel, addtlText: newContent }).catch(() => {});
                                     }}
                                 />
                             );
@@ -380,11 +417,13 @@ const Canvas: React.FC = () => {
                                     content={item.content}
                                     style={style}
                                     onChange={(newLabel, newContent) => {
-                                        setItems(items.map(i => 
-                                            i.id === item.id 
+                                        setItems(items.map(i =>
+                                            i.id === item.id
                                                 ? { ...i, label: newLabel, content: newContent }
                                                 : i
                                         ));
+                                        // Persist leaf edits to ideas CRUD
+                                        updateIdea(userId, projectId, item.id, { text: newLabel, addtlText: newContent }).catch(() => {});
                                     }}
                                 />
                             );
