@@ -2,7 +2,6 @@
 
 import { useParams } from "next/navigation";
 import { useProjectData } from "@/hooks/useProjectData";
-import { useRef } from "react";
 
 import {
     SidebarProvider,
@@ -16,11 +15,11 @@ import {
 import { Button } from "@/components/ui/button";
 import Link from "next/link";
 import Canvas from "@/components/canvas/Canvas";
+import { useAuth } from "@/hooks/useAuth";
 
 export default function ProjectPage() {
-  const activeIdea = useRef<HTMLDivElement>(null);
-
-  const projectId = useParams()?.projectId as string | null;
+    const projectId = useParams()?.projectId as string | null;
+    const { user } = useAuth();
   const info = useProjectData(projectId);
   const data = info.project?.data;
 
@@ -29,7 +28,9 @@ export default function ProjectPage() {
             <SidebarProvider>
                 <main className="flex-1">
                     {/* Main project content goes here (canvas) */}
-                    <Canvas />
+                    {user && projectId && (
+                        <Canvas userId={user.uid} projectId={projectId} />
+                    )}
                 </main>
                 <div className="fixed right-4 top-4 z-50">
                     <SidebarTrigger />
