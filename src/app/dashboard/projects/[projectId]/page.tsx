@@ -45,7 +45,7 @@ export default function ProjectPage() {
                     </SidebarContent>
                     <SidebarFooter>
                         <Button className="flex items-center gap-2">
-                            <Link href="/dashboard">Return</Link>
+                            <Link className="w-full" href="/dashboard">Return</Link>
                         </Button>
                     </SidebarFooter>
                 </Sidebar>
