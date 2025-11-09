@@ -2,8 +2,9 @@
 import React from 'react';
 import { Button } from '../ui/button';
 
+
 interface ToolbarProps {
-    addItem: (type: 'rectangle' | 'circle') => void;
+    addItem: (type: 'branch' | 'leaf') => void;
     onCenter: () => void;
 }
 
@@ -13,17 +14,17 @@ const Toolbar: React.FC<ToolbarProps> = ({ addItem, onCenter }) => {
             <div className="gap-4 flex flex-row items-center">
                 <Button 
                     variant="outline"
-                    onClick={() => addItem('rectangle')}
+                    onClick={() => addItem('branch')}
                     className="px-4 py-2"
                 >
-                    Add Rectangle
+                    Add Branch
                 </Button>
                 <Button 
                     variant="outline"
-                    onClick={() => addItem('circle')}
+                    onClick={() => addItem('leaf')}
                     className="px-4 py-2"
                 >
-                    Add Circle
+                    Add Leaf
                 </Button>
                 <Button 
                     variant="outline"

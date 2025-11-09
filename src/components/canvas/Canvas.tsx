@@ -1,14 +1,19 @@
 'use client';
 import React, { useRef, useEffect, useState, useCallback } from 'react';
 import Toolbar from './Toolbar';
+import Branch from '../Branch';
+import Leaf from '../Leaf';
+import { createCanvasBlockWithIdea, listIdeasForProject } from '../../services/firestore';
 
-type ItemType = 'rectangle' | 'circle';
+type ItemType = 'branch' | 'leaf';
 
 interface Item {
     id: string;
     type: ItemType;
     x: number; // world coordinates
     y: number; // world coordinates
+    label: string;
+    content?: string;
 }
 
 const clamp = (v: number, a: number, b: number) => Math.max(a, Math.min(b, v));
@@ -47,6 +52,34 @@ const smoothTransition = (
 };
 
 const Canvas: React.FC = () => {
+    // TODO: Replace with actual user/project context
+    const userId = 'demoUser';
+    const projectId = 'demoProject';
+    // Smoothly center the view and reset zoom
+    const centerView = useCallback(() => {
+        const canvas = canvasRef.current;
+        if (!canvas) return;
+        const startScale = scaleRef.current;
+        const startTx = txRef.current;
+        const startTy = tyRef.current;
+        const targetScale = 1;
+        const cssWidth = canvas.clientWidth;
+        const cssHeight = canvas.clientHeight;
+        const targetTx = cssWidth / 2;
+        const targetTy = cssHeight / 2;
+        smoothTransition(startScale, targetScale, (value) => {
+            scaleRef.current = value;
+            setScale(value);
+        });
+        smoothTransition(startTx, targetTx, (value) => {
+            txRef.current = value;
+            setTranslateX(value);
+        });
+        smoothTransition(startTy, targetTy, (value) => {
+            tyRef.current = value;
+            setTranslateY(value);
+        });
+    }, []);
     const canvasRef = useRef<HTMLCanvasElement | null>(null);
     const [scale, setScale] = useState<number>(1);
     const [translateX, setTranslateX] = useState<number>(0);
@@ -141,25 +174,6 @@ const Canvas: React.FC = () => {
             }
         }
 
-        // item colors from CSS variables (fallbacks provided)
-        const rootStyles = getComputedStyle(document.documentElement);
-        const primaryColor = rootStyles.getPropertyValue('--primary')?.trim() || '#2563EB';
-        const destructiveColor = rootStyles.getPropertyValue('--destructive')?.trim() || '#DC2626';
-
-        itemsRef.current.forEach((item) => {
-            if (item.type === 'rectangle') {
-                ctx.fillStyle = primaryColor;
-                ctx.fillRect(item.x - 50, item.y - 25, 100, 50);
-                ctx.strokeStyle = 'rgba(0,0,0,0.12)';
-                ctx.strokeRect(item.x - 50, item.y - 25, 100, 50);
-            } else if (item.type === 'circle') {
-                ctx.fillStyle = destructiveColor;
-                ctx.beginPath();
-                ctx.arc(item.x, item.y, 40, 0, Math.PI * 2);
-                ctx.fill();
-            }
-        });
-
         ctx.restore();
     }, []);
 
@@ -187,6 +201,10 @@ const Canvas: React.FC = () => {
         // initial
         resize();
 
+        // Center the view on initial mount (client only)
+        setTranslateX(Math.max(document.documentElement.clientWidth, window.innerWidth || 0) / 2);
+        setTranslateY(Math.max(document.documentElement.clientHeight, window.innerHeight || 0) / 2);
+
         return () => {
             window.removeEventListener('resize', onResize);
             if (rafRef.current) cancelAnimationFrame(rafRef.current);
@@ -200,7 +218,7 @@ const Canvas: React.FC = () => {
         return () => { if (rafRef.current) cancelAnimationFrame(rafRef.current); };
     }, [scale, translateX, translateY, items, render]);
 
-    // wheel zoom (zoom towards pointer) - update refs immediately for responsive feedback
+    // wheel zoom (zoom towards pointer)
     const handleWheel: React.WheelEventHandler<HTMLCanvasElement> = (e) => {
         e.preventDefault();
         const canvas = canvasRef.current;
@@ -210,26 +228,19 @@ const Canvas: React.FC = () => {
         const mouseX = e.clientX - rect.left;
         const mouseY = e.clientY - rect.top;
 
-        const zoomIntensity = 0.0015; // finer control
-        const delta = -e.deltaY; // invert so wheel up zooms in (typical)
-
+        const zoomIntensity = 0.0015;
+        const delta = -e.deltaY;
 
         const prevScale = scaleRef.current;
         const newScale = clamp(prevScale * (1 + delta * zoomIntensity), 0.2, 6);
 
-        // Correct math to keep the world point under the cursor fixed:
-        // world = (screen - tx) / scale
-        // newTx must satisfy: mouseX = world * newScale + newTx
-        // => newTx = mouseX - world * newScale = mouseX - ((mouseX - tx)/prevScale) * newScale
         let newTx = mouseX - ((mouseX - txRef.current) / prevScale) * newScale;
         let newTy = mouseY - ((mouseY - tyRef.current) / prevScale) * newScale;
 
-        // clamp to world bounds
         const { tx: clampedTx, ty: clampedTy } = clampTranslation(newTx, newTy, newScale);
         newTx = clampedTx;
         newTy = clampedTy;
 
-        // sync refs and state
         scaleRef.current = newScale;
         txRef.current = newTx;
         tyRef.current = newTy;
@@ -255,7 +266,6 @@ const Canvas: React.FC = () => {
         let newTx = e.clientX - startRef.current.x;
         let newTy = e.clientY - startRef.current.y;
 
-        // clamp to world bounds
         const { tx: clampedTx, ty: clampedTy } = clampTranslation(newTx, newTy, scaleRef.current);
         newTx = clampedTx;
         newTy = clampedTy;
@@ -273,88 +283,122 @@ const Canvas: React.FC = () => {
     };
 
     // Smoothly center the view and reset zoom
-    const centerView = useCallback(() => {
-        const canvas = canvasRef.current;
-        if (!canvas) return;
-
-        // Start transitions from current values
-        const startScale = scaleRef.current;
-        const startTx = txRef.current;
-        const startTy = tyRef.current;
-
-        // Target scale is 1 (100%)
-        const targetScale = 1;
-
-        // Target translation is centered (0,0)
-        const cssWidth = canvas.clientWidth;
-        const cssHeight = canvas.clientHeight;
-        const targetTx = cssWidth / 2;
-        const targetTy = cssHeight / 2;
-
-        // Animate scale
-        smoothTransition(startScale, targetScale, (value) => {
-            scaleRef.current = value;
-            setScale(value);
-        });
-
-        // Animate translations
-        smoothTransition(startTx, targetTx, (value) => {
-            txRef.current = value;
-            setTranslateX(value);
-        });
-        
-        smoothTransition(startTy, targetTy, (value) => {
-            tyRef.current = value;
-            setTranslateY(value);
-        });
-    }, []);
-
-    // add item in the center of the visible canvas
-    const addItem = useCallback((type: ItemType) => {
+    const addItem = useCallback(async (type: ItemType) => {
         const canvas = canvasRef.current;
         if (!canvas) return;
         const cssWidth = canvas.clientWidth;
         const cssHeight = canvas.clientHeight;
         const worldX = (cssWidth / 2 - txRef.current) / scaleRef.current;
         const worldY = (cssHeight / 2 - tyRef.current) / scaleRef.current;
-        const newItem: Item = {
-            id: String(Date.now()) + Math.random().toString(36).slice(2, 8),
+        // Create Firestore-linked block
+        const block = await createCanvasBlockWithIdea(
+            userId,
+            projectId,
             type,
-            x: worldX,
-            y: worldY,
-        };
+            type === 'branch' ? 'New Branch' : 'New Question',
+            '',
+            undefined,
+            undefined
+        );
         setItems((prev) => {
-            const next = [...prev, newItem];
+            const next = [...prev, {
+                id: block.id,
+                type: block.type,
+                x: worldX,
+                y: worldY,
+                label: block.label,
+                content: block.content,
+            }];
             itemsRef.current = next;
             return next;
         });
-    }, []);
+    }, [userId, projectId, scale, translateX, translateY]);
 
+    // Main render
     return (
-        <div className="h-full w-full relative">
-            <Toolbar addItem={addItem} onCenter={centerView}/>
-            <canvas
-                ref={canvasRef}
-                onWheel={handleWheel}
-                onPointerDown={handlePointerDown}
-                onPointerMove={handlePointerMove}
-                onPointerUp={handlePointerUp}
-                onPointerCancel={handlePointerUp}
-                style={{
-                    width: '100%',
-                    height: '100%',
-                    display: 'block',
-                    touchAction: 'none',
-                    opacity: isAtEdge ? 0.95 : 1,
-                    transition: 'opacity 150ms ease-in-out',
-                }}
-            />
-
-            <div className="text-center fixed bottom-4 left-4 z-10 bg-card p-2 rounded shadow">
-                Zoom: {(scale * 100).toFixed(0)}%
+        <div className="absolute inset-0 flex flex-col overflow-hidden bg-background">
+            {/* Top toolbar - always visible */}
+            <div className="w-full flex-none z-10 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/75 border-b">
+                <Toolbar addItem={addItem} onCenter={centerView}/>
+            </div>
+            {/* Canvas container - fills remaining space */}
+            <div className="flex-1 relative overflow-hidden">
+                <canvas
+                    ref={canvasRef}
+                    onWheel={handleWheel}
+                    onPointerDown={handlePointerDown}
+                    onPointerMove={handlePointerMove}
+                    onPointerUp={handlePointerUp}
+                    onPointerCancel={handlePointerUp}
+                    style={{
+                        position: 'absolute',
+                        inset: 0,
+                        width: '100%',
+                        height: '100%',
+                        display: 'block',
+                        touchAction: 'none',
+                        opacity: isAtEdge ? 0.95 : 1,
+                        transition: 'opacity 150ms ease-in-out',
+                    }}
+                    className="bg-background"
+                />
+                {/* Block container */}
+                <div className="absolute inset-0 pointer-events-none">
+                    {items.map((item) => {
+                        const screenX = item.x * scale + translateX;
+                        const screenY = item.y * scale + translateY;
+                        const style: React.CSSProperties = {
+                            position: 'absolute',
+                            left: screenX,
+                            top: screenY,
+                            transform: `translate(-50%, -50%) scale(${scale})`,
+                            transformOrigin: 'center center',
+                            zIndex: 2,
+                            pointerEvents: 'auto',
+                        };
+                        if (item.type === 'branch') {
+                            return (
+                                <Branch
+                                    key={item.id}
+                                    label={item.label}
+                                    content={item.content}
+                                    style={style}
+                                    onChange={(newLabel, newContent) => {
+                                        setItems(items.map(i => 
+                                            i.id === item.id 
+                                                ? { ...i, label: newLabel, content: newContent }
+                                                : i
+                                        ));
+                                    }}
+                                />
+                            );
+                        } else if (item.type === 'leaf') {
+                            return (
+                                <Leaf
+                                    key={item.id}
+                                    label={item.label}
+                                    content={item.content}
+                                    style={style}
+                                    onChange={(newLabel, newContent) => {
+                                        setItems(items.map(i => 
+                                            i.id === item.id 
+                                                ? { ...i, label: newLabel, content: newContent }
+                                                : i
+                                        ));
+                                    }}
+                                />
+                            );
+                        }
+                        return null;
+                    })}
+                </div>
+                {/* Zoom indicator */}
+                <div className="absolute bottom-4 left-4 z-10 bg-card p-2 rounded shadow text-sm">
+                    Zoom: {(scale * 100).toFixed(0)}%
+                </div>
             </div>
         </div>
     );
-};
+}
 
 export default Canvas;

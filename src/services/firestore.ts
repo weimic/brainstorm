@@ -19,6 +19,7 @@ import {
   type Timestamp,
 } from 'firebase/firestore';
 import { firebaseApp } from './firebase';
+import type { CanvasBlock, BlockType } from '../lib/canvasModel';
 
 // Firestore instance
 export const db = getFirestore(firebaseApp);
@@ -210,4 +211,33 @@ export async function setIdeaIndex(
   newIndex: number
 ): Promise<void> {
   await updateDoc(ideaDocRef(userId, projectId, ideaId), { index: newIndex });
+}
+
+// Create a CanvasBlock and its corresponding Idea in Firestore
+export async function createCanvasBlockWithIdea(
+  userId: string,
+  projectId: string,
+  blockType: BlockType,
+  label: string,
+  content?: string,
+  parentId?: string,
+  directionFromParent?: 'up' | 'down' | 'left' | 'right'
+): Promise<CanvasBlock> {
+  // Create the Idea in Firestore
+  const ideaId = await createIdea(userId, projectId, {
+    text: label,
+    addtlText: content,
+  });
+
+  // Build the CanvasBlock, using the ideaId as the block id
+  const block: CanvasBlock = {
+    id: ideaId, // Link block id to Firestore idea id
+    type: blockType,
+    label,
+    content,
+    parentId,
+    children: [],
+    directionFromParent,
+  };
+  return block;
 }
